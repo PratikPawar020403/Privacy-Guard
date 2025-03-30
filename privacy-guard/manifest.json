@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Privacy Guard",
+  "version": "1.0",
+  "description": "Protects sensitive Indian data from accidental submission",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "file:///*"
+  ],
+  "icons": {
+    "48": "icons/icon48.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icons/icon48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>", "file:///*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

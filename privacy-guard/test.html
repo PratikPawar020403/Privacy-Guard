@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Privacy Guard Test Page</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 20px auto; padding: 20px; }
+        .test-form { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        input, textarea { width: 100%; margin: 5px 0; padding: 8px; box-sizing: border-box; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; }
+        .sample-data { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .test-buttons { margin-top: 10px; }
+        .test-button { margin-right: 10px; background: #28a745; }
+    </style>
+</head>
+<body>
+    <h1>Privacy Guard Test Page</h1>
+    <p>This page helps test the Privacy Guard extension's popup alerts for sensitive information.</p>
+    
+    <div class="test-form">
+        <h3>Test Form 1: Government Documents</h3>
+        <form id="govtForm" class="government">
+            <input type="text" id="aadhaar" name="aadhaar" placeholder="Enter Aadhaar Number (e.g., 1234 5678 9012)">
+            <input type="text" id="pan" name="pan" placeholder="Enter PAN Number (e.g., ABCDE1234F)">
+            <div class="test-buttons">
+                <button type="button" class="test-button" onclick="fillSampleData('govt')">Fill Sample Data</button>
+                <button type="submit">Submit Government Details</button>
+            </div>
+        </form>
+        <div class="sample-data">
+            Sample Aadhaar: 4929 1829 3848<br>
+            Sample PAN: AZQPC5723R
+        </div>
+    </div>
+
+    <div class="test-form">
+        <h3>Test Form 2: Banking Details</h3>
+        <form id="bankForm" class="banking">
+            <input type="text" id="account" name="account" placeholder="Enter Account Number">
+            <input type="text" id="ifsc" name="ifsc" placeholder="Enter IFSC Code">
+            <input type="text" id="upi" name="upi" placeholder="Enter UPI ID">
+            <div class="test-buttons">
+                <button type="button" class="test-button" onclick="fillSampleData('bank')">Fill Sample Data</button>
+                <button type="submit">Submit Banking Details</button>
+            </div>
+        </form>
+        <div class="sample-data">
+            Sample Account: 123456789012<br>
+            Sample IFSC: SBIN0123456<br>
+            Sample UPI: user@okaxis
+        </div>
+    </div>
+
+    <div class="test-form">
+        <h3>Test Form 3: Personal Information</h3>
+        <form id="personalForm" class="personal">
+            <input type="text" id="phone" name="phone" placeholder="Enter Phone Number">
+            <input type="text" id="card" name="card" placeholder="Enter Card Number">
+            <div class="test-buttons">
+                <button type="button" class="test-button" onclick="fillSampleData('personal')">Fill Sample Data</button>
+                <button type="submit">Submit Personal Details</button>
+            </div>
+        </form>
+        <div class="sample-data">
+            Sample Phone: +91 9876543210<br>
+            Sample Card: 4532 1234 5678 9012
+        </div>
+    </div>
+
+    <div id="testResults">
+        <h2>Test Results:</h2>
+        <ul id="testLog"></ul>
+    </div>
+
+    <script>
+        // Sample data for testing
+        const sampleData = {
+            govt: {
+                aadhaar: '4929 1829 3848',
+                pan: 'AZQPC5723R'
+            },
+            bank: {
+                account: '123456789012',
+                ifsc: 'SBIN0123456',
+                upi: 'user@okaxis'
+            },
+            personal: {
+                phone: '+91 9876543210',
+                card: '4532 1234 5678 9012'
+            }
+        };
+
+        // Fill sample data into forms
+        function fillSampleData(formType) {
+            const data = sampleData[formType];
+            for (const [id, value] of Object.entries(data)) {
+                document.getElementById(id).value = value;
+            }
+            logTest(`Filled ${formType} form with sample data`);
+        }
+
+        // Log test results
+        function logTest(message) {
+            const log = document.getElementById('testLog');
+            const item = document.createElement('li');
+            const time = new Date().toLocaleTimeString();
+            item.textContent = `${time}: ${message}`;
+            log.insertBefore(item, log.firstChild);
+        }
+
+        // Add form submission handlers
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                logTest(`Attempting to submit ${form.id} - Privacy Guard should show popup if working correctly`);
+            });
+        });
+    </script>
+</body>
+</html>

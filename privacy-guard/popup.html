@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Privacy Guard Settings</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="popup-container">
+        <h2>🛡️ Privacy Guard</h2>
+        
+        <div class="status-section">
+            <div class="status-indicator">
+                <span class="status-dot active"></span>
+                <span class="status-text">Protection Active</span>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="enableProtection" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="settings-section">
+            <h3>Protection Settings</h3>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="detectAadhaar" checked>
+                    Aadhaar Number
+                </label>
+            </div>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="detectPAN" checked>
+                    PAN Card
+                </label>
+            </div>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="detectBank" checked>
+                    Bank Details
+                </label>
+            </div>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="detectPhone" checked>
+                    Phone Numbers
+                </label>
+            </div>
+        </div>
+
+        <div class="trusted-sites">
+            <h3>Trusted Sites</h3>
+            <div id="trustedList" class="trusted-list">
+                <!-- Trusted sites will be listed here -->
+            </div>
+            <button id="clearTrusted" class="clear-btn">Clear All Trusted Sites</button>
+        </div>
+
+        <div class="info-section">
+            <p>Privacy Guard protects your sensitive information from accidental sharing.</p>
+            <small>Version 1.0</small>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
