@@ -1,486 +1,564 @@
 
-"use strict";
+(() => {
+  "use strict";
 
-// Privacy Guard — Indian sensitive-data detection
-const indianPatterns = {
-  pan: /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g,
-  aadhaar: /\b(?!0000\s?0000\s?0000\b)(?:[2-9]\d{3}[\s-]?){2}\d{4}\b/g,
-  phone: /(?:(?:\+91|0)?[\s-]?)?[6789]\d{9}\b/g,
-  account: /\b\d{9,18}\b/g,
-  ifsc: /\b[A-Z]{4}0[A-Z0-9]{6}\b/gi,
-  upi: /[\w.-]+@(?:oksbi|okaxis|okicici|okhdfc|ybl|ibl|upi|paytm|apl)\b/gi,
-  card: /\b(?:\d{4}[\s-]?){3}\d{4}\b/g
-};
+  // Prevent duplicate listeners if the script is injected more than once.
+  if (window.__privacyGuardInitialized) return;
+  window.__privacyGuardInitialized = true;
 
-const typeLabels = {
-  aadhaar: "Aadhaar Number",
-  pan: "PAN Card",
-  phone: "Phone Number",
-  account: "Bank Account Number",
-  ifsc: "IFSC Code",
-  upi: "UPI ID",
-  card: "Card Number"
-};
+  const indianPatterns = {
+    pan: /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g,
 
-// Forms approved for submission once, without another warning.
-const bypassForms = new WeakSet();
+    aadhaar:
+      /\b(?!0000\s?0000\s?0000\b)(?:[2-9]\d{3}[\s-]?){2}\d{4}\b/g,
 
-// Safely read extension settings.
-async function getStorageSettings() {
-  try {
-    if (!chrome?.storage?.local) return null;
+    phone:
+      /(?<!\d)(?:(?:\+91|91|0)[\s-]?)?[6-9]\d{9}(?!\d)/g,
 
-    return await chrome.storage.local.get([
-      "enabled",
-      "detectAadhaar",
-      "detectPAN",
-      "detectBank",
-      "detectPhone",
-      "trustedDomains"
-    ]);
-  } catch (error) {
-    console.warn("Privacy Guard: Could not access Chrome storage.", error);
-    return null;
-  }
-}
+    account: /\b\d{9,18}\b/g,
 
-// Add the current website to the trusted-sites list.
-async function saveTrustedDomain(domain) {
-  try {
-    const result = await chrome.storage.local.get("trustedDomains");
-    const domains = result.trustedDomains || [];
+    ifsc: /\b[A-Z]{4}0[A-Z0-9]{6}\b/gi,
 
-    if (!domains.includes(domain)) {
-      await chrome.storage.local.set({
-        trustedDomains: [...domains, domain]
-      });
-    }
+    upi:
+      /\b[\w.-]+@(?:oksbi|okaxis|okicici|okhdfc|ybl|ibl|upi|paytm|apl)\b/gi,
 
-    return true;
-  } catch (error) {
-    console.warn("Privacy Guard: Could not save trusted site.", error);
-    return false;
-  }
-}
-
-// Map popup settings to detection types.
-function getEnabledTypes(settings) {
-  return {
-    aadhaar: settings.detectAadhaar !== false,
-    pan: settings.detectPAN !== false,
-    phone: settings.detectPhone !== false,
-    account: settings.detectBank !== false,
-    ifsc: settings.detectBank !== false,
-    upi: settings.detectBank !== false,
-    card: settings.detectBank !== false
+    card: /\b(?:\d{4}[\s-]?){3}\d{4}\b/g
   };
-}
 
-// Find sensitive-looking values in text form fields.
-function detectSensitiveData(formData, enabledTypes) {
-  const detected = [];
+  const DEFAULT_SETTINGS = {
+    enabled: true,
+    detectAadhaar: true,
+    detectPAN: true,
+    detectBank: true,
+    detectPhone: true,
+    trustedDomains: []
+  };
 
-  for (const [, value] of formData.entries()) {
-    if (typeof value !== "string" || !value.trim()) continue;
+  let modalOpen = false;
+  const bypassForms = new WeakSet();
 
-    for (const [type, pattern] of Object.entries(indianPatterns)) {
-      if (!enabledTypes[type]) continue;
-
-      pattern.lastIndex = 0;
-      const matches = value.match(pattern);
-
-      if (!matches) continue;
-
-      let item = detected.find(entry => entry.type === type);
-
-      if (!item) {
-        item = { type, values: [] };
-        detected.push(item);
+  // Safely read extension settings.
+  async function getStorageSettings() {
+    try {
+      if (
+        typeof chrome === "undefined" ||
+        !chrome.storage ||
+        !chrome.storage.local
+      ) {
+        console.warn(
+          "Privacy Guard: Storage unavailable. Check extension context and permissions."
+        );
+        return null;
       }
 
-      for (const match of matches) {
-        if (!item.values.includes(match)) {
-          item.values.push(match);
+      const stored = await chrome.storage.local.get([
+        "enabled",
+        "detectAadhaar",
+        "detectPAN",
+        "detectBank",
+        "detectPhone",
+        "trustedDomains"
+      ]);
+
+      return {
+        ...DEFAULT_SETTINGS,
+        ...stored,
+        trustedDomains: Array.isArray(stored.trustedDomains)
+          ? stored.trustedDomains
+          : []
+      };
+    } catch (error) {
+      console.error(
+        "Privacy Guard: Could not access extension storage:",
+        error
+      );
+      return null;
+    }
+  }
+
+  // Store a trusted domain.
+  async function saveTrustedDomain(domain) {
+    try {
+      if (
+        typeof chrome === "undefined" ||
+        !chrome.storage ||
+        !chrome.storage.local
+      ) {
+        return false;
+      }
+
+      const result = await chrome.storage.local.get("trustedDomains");
+      const domains = Array.isArray(result.trustedDomains)
+        ? result.trustedDomains
+        : [];
+
+      if (!domains.includes(domain)) {
+        domains.push(domain);
+        await chrome.storage.local.set({ trustedDomains: domains });
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Privacy Guard: Could not save trusted domain:", error);
+      return false;
+    }
+  }
+
+  function getDomain() {
+    try {
+      return window.location.hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+
+  function getEnabledTypes(settings) {
+    const types = [];
+
+    if (settings.detectAadhaar) {
+      types.push({ name: "Aadhaar Number", regex: indianPatterns.aadhaar });
+    }
+
+    if (settings.detectPAN) {
+      types.push({ name: "PAN Card", regex: indianPatterns.pan });
+    }
+
+    if (settings.detectPhone) {
+      types.push({ name: "Phone Number", regex: indianPatterns.phone });
+    }
+
+    if (settings.detectBank) {
+      types.push(
+        { name: "Bank Account Number", regex: indianPatterns.account },
+        { name: "IFSC Code", regex: indianPatterns.ifsc },
+        { name: "UPI ID", regex: indianPatterns.upi },
+        { name: "Card Number", regex: indianPatterns.card }
+      );
+    }
+
+    return types;
+  }
+
+  function detectSensitiveData(text, settings) {
+    if (!text || typeof text !== "string") return [];
+
+    const matches = [];
+    const seen = new Set();
+    const types = getEnabledTypes(settings);
+
+    for (const type of types) {
+      // Reset regex state before every scan.
+      type.regex.lastIndex = 0;
+
+      const found = text.match(type.regex) || [];
+
+      for (const value of found) {
+        const key = `${type.name}:${value}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          matches.push({
+            type: type.name,
+            value
+          });
         }
       }
     }
+
+    return matches;
   }
 
-  return detected;
-}
+  function maskSensitiveValue(value) {
+    const clean = String(value);
 
-// Mask sensitive values before displaying them in the warning.
-function maskSensitiveValue(type, value) {
-  switch (type) {
-    case "aadhaar": {
-      const digits = value.replace(/\D/g, "");
-      return `XXXX XXXX ${digits.slice(-4)}`;
+    if (clean.length <= 4) {
+      return "*".repeat(clean.length);
     }
 
-    case "pan":
-      return `${value.slice(0, 2)}XXX XXXX${value.slice(-1)}`;
+    return "*".repeat(Math.max(4, clean.length - 4)) +
+      clean.slice(-4);
+  }
 
-    case "card": {
-      const digits = value.replace(/\D/g, "");
-      return `XXXX XXXX XXXX ${digits.slice(-4)}`;
+  function getFormSensitiveData(form, settings) {
+    const values = [];
+
+    try {
+      const formData = new FormData(form);
+
+      for (const [name, value] of formData.entries()) {
+        if (typeof value === "string" && value.trim()) {
+          values.push({ name, value });
+        }
+      }
+    } catch (error) {
+      console.warn("Privacy Guard: Could not read form data:", error);
     }
 
-    case "phone": {
-      const digits = value.replace(/\D/g, "");
-      return `XXXXXX${digits.slice(-4)}`;
+    const matches = [];
+    const seen = new Set();
+
+    for (const item of values) {
+      const found = detectSensitiveData(item.value, settings);
+
+      for (const match of found) {
+        const key = `${match.type}:${match.value}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          matches.push(match);
+        }
+      }
     }
 
-    case "account":
-      return `XXXX${value.slice(-4)}`;
-
-    default:
-      return value;
-  }
-}
-
-// Build the warning using textContent to avoid injecting page data as HTML.
-function createModal(detected) {
-  const overlay = document.createElement("div");
-  overlay.className = "privacy-guard-overlay";
-
-  const modal = document.createElement("div");
-  modal.className = "privacy-modal";
-  modal.setAttribute("role", "dialog");
-  modal.setAttribute("aria-modal", "true");
-  modal.setAttribute("aria-labelledby", "privacy-guard-title");
-
-  const title = document.createElement("h3");
-  title.id = "privacy-guard-title";
-  title.textContent = "🛡️ Privacy Alert!";
-
-  const intro = document.createElement("p");
-  intro.textContent =
-    "We detected the following sensitive information:";
-
-  const list = document.createElement("ul");
-
-  for (const item of detected) {
-    const li = document.createElement("li");
-    const strong = document.createElement("strong");
-
-    strong.textContent = typeLabels[item.type] || item.type;
-    li.append(strong, document.createTextNode(": "));
-
-    const masked = item.values
-      .slice(0, 2)
-      .map(value => maskSensitiveValue(item.type, value));
-
-    li.appendChild(
-      document.createTextNode(
-        masked.join(", ") + (item.values.length > 2 ? " ..." : "")
-      )
-    );
-
-    list.appendChild(li);
+    return matches;
   }
 
-  const warning = document.createElement("p");
-  warning.className = "warning-text";
-  warning.textContent =
-    "Are you sure you want to share this information?";
+  function injectStyles() {
+    if (document.getElementById("privacy-guard-styles")) return;
 
-  const buttons = document.createElement("div");
-  buttons.className = "modal-buttons";
+    const style = document.createElement("style");
+    style.id = "privacy-guard-styles";
 
-  const rememberLabel = document.createElement("label");
-  rememberLabel.className = "remember-choice";
-
-  const rememberCheckbox = document.createElement("input");
-  rememberCheckbox.type = "checkbox";
-  rememberCheckbox.id = "remember-choice";
-
-  rememberLabel.append(
-    rememberCheckbox,
-    document.createTextNode(" Remember this site")
-  );
-
-  const buttonGroup = document.createElement("div");
-  buttonGroup.className = "button-group";
-
-  const cancelButton = document.createElement("button");
-  cancelButton.type = "button";
-  cancelButton.className = "cancel-btn";
-  cancelButton.textContent = "Cancel";
-
-  const proceedButton = document.createElement("button");
-  proceedButton.type = "button";
-  proceedButton.className = "proceed-btn";
-  proceedButton.textContent = "Proceed";
-
-  const loading = document.createElement("div");
-  loading.className = "loading-indicator";
-  loading.textContent = "Processing...";
-  loading.style.display = "none";
-
-  buttonGroup.append(cancelButton, proceedButton);
-  buttons.append(rememberLabel, buttonGroup);
-  modal.append(title, intro, list, warning, buttons, loading);
-  overlay.appendChild(modal);
-
-  (document.body || document.documentElement).appendChild(overlay);
-
-  return {
-    overlay,
-    cancelButton,
-    proceedButton,
-    rememberCheckbox,
-    loading
-  };
-}
-
-// Resume submission while allowing the browser's validation to run.
-function resubmitForm(form, submitter) {
-  // If the form is invalid, do not bypass the next user submission.
-  if (!form.checkValidity()) {
-    form.reportValidity();
-    return;
-  }
-
-  bypassForms.add(form);
-
-  try {
-    if (
-      submitter &&
-      submitter.form === form &&
-      typeof form.requestSubmit === "function"
-    ) {
-      form.requestSubmit(submitter);
-    } else {
-      form.requestSubmit();
-    }
-  } catch (error) {
-    bypassForms.delete(form);
-    console.warn("Privacy Guard: Could not resume form submission.", error);
-  }
-}
-
-// Display the warning and wait for the user's choice.
-function showPrivacyWarning(form, submitter, detected, domain) {
-  return new Promise(resolve => {
-    const ui = createModal(detected);
-    let finished = false;
-
-    function finish(shouldSubmit) {
-      if (finished) return;
-      finished = true;
-      ui.overlay.remove();
-
-      if (shouldSubmit) {
-        resubmitForm(form, submitter);
+    style.textContent = `
+      #privacy-guard-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        background: rgba(15, 23, 42, 0.65);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        font-family: Arial, sans-serif;
       }
 
-      resolve(shouldSubmit);
+      #privacy-guard-modal {
+        width: 100%;
+        max-width: 440px;
+        box-sizing: border-box;
+        background: #ffffff;
+        color: #172033;
+        border-radius: 18px;
+        padding: 24px;
+        box-shadow: 0 20px 70px rgba(0, 0, 0, 0.3);
+      }
+
+      #privacy-guard-modal * {
+        box-sizing: border-box;
+      }
+
+      #privacy-guard-modal .pg-icon {
+        font-size: 34px;
+        margin-bottom: 10px;
+      }
+
+      #privacy-guard-modal h2 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        line-height: 1.3;
+      }
+
+      #privacy-guard-modal p {
+        font-size: 14px;
+        line-height: 1.6;
+        margin: 8px 0 14px;
+      }
+
+      #privacy-guard-modal .pg-list {
+        padding: 12px;
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 10px;
+        margin: 14px 0;
+        max-height: 180px;
+        overflow-y: auto;
+      }
+
+      #privacy-guard-modal .pg-item {
+        font-size: 13px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+        margin: 5px 0;
+      }
+
+      #privacy-guard-modal .pg-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      #privacy-guard-modal button {
+        flex: 1;
+        min-width: 120px;
+        border: 0;
+        border-radius: 9px;
+        padding: 12px 14px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      #privacy-guard-modal .pg-cancel {
+        background: #e5e7eb;
+        color: #111827;
+      }
+
+      #privacy-guard-modal .pg-proceed {
+        background: #dc2626;
+        color: #ffffff;
+      }
+
+      #privacy-guard-modal .pg-trust {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        font-size: 13px;
+        margin-top: 14px;
+        line-height: 1.5;
+      }
+
+      #privacy-guard-modal .pg-trust input {
+        margin-top: 3px;
+      }
+    `;
+
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function removeModal() {
+    const overlay = document.getElementById("privacy-guard-overlay");
+
+    if (overlay) overlay.remove();
+
+    modalOpen = false;
+  }
+
+  function resumeFormSubmission(form, submitter) {
+    if (!form || !form.isConnected) return;
+
+    // Respect built-in HTML validation.
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
     }
 
-    ui.cancelButton.addEventListener("click", () => {
-      finish(false);
+    // Prevent our submit listener from intercepting the resumed submission.
+    bypassForms.add(form);
+
+    try {
+      if (typeof form.requestSubmit === "function") {
+        if (submitter && submitter.form === form) {
+          form.requestSubmit(submitter);
+        } else {
+          form.requestSubmit();
+        }
+      } else {
+        bypassForms.delete(form);
+        console.warn(
+          "Privacy Guard: This browser does not support requestSubmit()."
+        );
+        return;
+      }
+    } catch (error) {
+      console.error("Privacy Guard: Could not resume form submission:", error);
+    } finally {
+      // requestSubmit dispatches the submit event synchronously.
+      bypassForms.delete(form);
+    }
+  }
+
+  function showPrivacyWarning(form, submitter, matches, domain) {
+    if (modalOpen) return;
+
+    injectStyles();
+    modalOpen = true;
+
+    const overlay = document.createElement("div");
+    overlay.id = "privacy-guard-overlay";
+
+    const modal = document.createElement("div");
+    modal.id = "privacy-guard-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "pg-title");
+
+    const icon = document.createElement("div");
+    icon.className = "pg-icon";
+    icon.textContent = "⚠️";
+
+    const title = document.createElement("h2");
+    title.id = "pg-title";
+    title.textContent = "Sensitive Information Detected";
+
+    const message = document.createElement("p");
+    message.textContent =
+      "Privacy Guard found information that may be sensitive in this form. Please review it before continuing.";
+
+    const list = document.createElement("div");
+    list.className = "pg-list";
+
+    for (const match of matches) {
+      const item = document.createElement("div");
+      item.className = "pg-item";
+
+      const type = document.createElement("strong");
+      type.textContent = `${match.type}: `;
+
+      const value = document.createElement("span");
+      value.textContent = maskSensitiveValue(match.value);
+
+      item.append(type, value);
+      list.appendChild(item);
+    }
+
+    const siteMessage = document.createElement("p");
+    siteMessage.textContent = domain
+      ? `Website: ${domain}`
+      : "Website domain could not be identified.";
+
+    const trustLabel = document.createElement("label");
+    trustLabel.className = "pg-trust";
+
+    const trustCheckbox = document.createElement("input");
+    trustCheckbox.type = "checkbox";
+
+    const trustText = document.createElement("span");
+    trustText.textContent =
+      "Trust this website in future and don't show this warning here.";
+
+    trustLabel.append(trustCheckbox, trustText);
+
+    const actions = document.createElement("div");
+    actions.className = "pg-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "pg-cancel";
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel Submission";
+
+    const proceedButton = document.createElement("button");
+    proceedButton.className = "pg-proceed";
+    proceedButton.type = "button";
+    proceedButton.textContent = "Proceed Anyway";
+
+    actions.append(cancelButton, proceedButton);
+
+    modal.append(
+      icon,
+      title,
+      message,
+      list,
+      siteMessage,
+      trustLabel,
+      actions
+    );
+
+    overlay.appendChild(modal);
+    (document.body || document.documentElement).appendChild(overlay);
+
+    cancelButton.addEventListener("click", () => {
+      removeModal();
     });
 
-    ui.proceedButton.addEventListener("click", async () => {
-      ui.proceedButton.disabled = true;
-      ui.cancelButton.disabled = true;
-      ui.loading.style.display = "block";
+    proceedButton.addEventListener("click", async () => {
+      proceedButton.disabled = true;
+      cancelButton.disabled = true;
+      proceedButton.textContent = "Continuing...";
 
-      if (ui.rememberCheckbox.checked) {
+      if (trustCheckbox.checked && domain) {
         await saveTrustedDomain(domain);
       }
 
-      finish(true);
+      removeModal();
+      resumeFormSubmission(form, submitter);
     });
 
-    ui.overlay.addEventListener("click", event => {
-      if (event.target === ui.overlay) {
-        finish(false);
+    // Clicking outside the dialog cancels the submission.
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        removeModal();
       }
     });
-  });
-}
 
-// Main form-submission handler.
-async function handleFormSubmission(event) {
-  const form = event.target;
+    // Escape closes the warning and leaves the form unsubmitted.
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        removeModal();
+        document.removeEventListener("keydown", handleEscape);
+      }
+    }
 
-  if (!(form instanceof HTMLFormElement)) return;
-
-  // This submission has already been approved.
-  if (bypassForms.has(form)) {
-    bypassForms.delete(form);
-    return;
+    document.addEventListener("keydown", handleEscape);
+    cancelButton.focus();
   }
 
-  event.preventDefault();
-  const submitter = event.submitter;
+  async function handleFormSubmission(event) {
+    const form = event.target;
 
-  try {
-    const settings = await getStorageSettings();
+    if (!(form instanceof HTMLFormElement)) return;
 
-    // If storage is unavailable, fail open so the site can still work.
+    // This is the intentional second submit after the user proceeds.
+    if (bypassForms.has(form)) {
+      bypassForms.delete(form);
+      return;
+    }
+
+    if (modalOpen) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    // Stop the first submission while settings and form data are checked.
+    event.preventDefault();
+
+    const submitter = event.submitter || null;
+
+    let settings = await getStorageSettings();
+
+    // If extension storage is unavailable, do not leave the form stuck.
+    // The warning cannot be guaranteed in this case.
     if (!settings) {
-      resubmitForm(form, submitter);
+      console.warn(
+        "Privacy Guard: Could not load settings; allowing form submission."
+      );
+      resumeFormSubmission(form, submitter);
       return;
     }
 
-    // Respect the main protection switch.
-    if (settings.enabled === false) {
-      resubmitForm(form, submitter);
+    if (!settings.enabled) {
+      resumeFormSubmission(form, submitter);
       return;
     }
 
-    const domain = window.location.hostname || "localhost";
-    const trustedDomains = settings.trustedDomains || [];
+    const domain = getDomain();
 
-    // Trusted sites must be allowed to submit.
-    if (trustedDomains.includes(domain)) {
-      resubmitForm(form, submitter);
+    if (
+      domain &&
+      settings.trustedDomains.includes(domain)
+    ) {
+      resumeFormSubmission(form, submitter);
       return;
     }
 
-    const enabledTypes = getEnabledTypes(settings);
-    const detected = detectSensitiveData(
-      new FormData(form),
-      enabledTypes
-    );
+    const matches = getFormSensitiveData(form, settings);
 
-    if (detected.length === 0) {
-      resubmitForm(form, submitter);
+    if (matches.length === 0) {
+      resumeFormSubmission(form, submitter);
       return;
     }
 
-    await showPrivacyWarning(form, submitter, detected, domain);
-  } catch (error) {
-    console.error("Privacy Guard: Form check failed.", error);
-    resubmitForm(form, submitter);
-  }
-}
-
-// Capture submit events before most page-level handlers.
-document.addEventListener("submit", handleFormSubmission, true);
-
-// Warning dialog styles.
-const styles = `
-  .privacy-guard-overlay {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 2147483647;
-    font-family: Arial, sans-serif;
+    showPrivacyWarning(form, submitter, matches, domain);
   }
 
-  .privacy-modal {
-    box-sizing: border-box;
-    background: #fff;
-    color: #222;
-    padding: 24px;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-    max-width: 500px;
-    width: calc(100% - 32px);
-    max-height: 90vh;
-    overflow-y: auto;
-    animation: privacyGuardSlideIn 0.2s ease-out;
-  }
+  injectStyles();
 
-  .privacy-modal h3 {
-    color: #dc3545;
-    margin: 0 0 14px;
-    font-size: 1.4em;
-  }
+  document.addEventListener(
+    "submit",
+    handleFormSubmission,
+    true
+  );
 
-  .privacy-modal ul {
-    margin: 14px 0;
-    padding-left: 22px;
-  }
-
-  .privacy-modal li {
-    overflow-wrap: anywhere;
-    margin: 8px 0;
-    padding: 10px;
-    background: #f5f6f8;
-    border-radius: 6px;
-  }
-
-  .warning-text {
-    color: #b42332;
-    font-weight: bold;
-    padding: 12px;
-    border-left: 4px solid #dc3545;
-    background: #fff4f4;
-    margin: 16px 0;
-  }
-
-  .modal-buttons {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 14px;
-    margin-top: 20px;
-  }
-
-  .button-group {
-    display: flex;
-    gap: 10px;
-  }
-
-  .privacy-modal button {
-    padding: 10px 16px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: 600;
-  }
-
-  .privacy-modal button:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-
-  .cancel-btn {
-    background: #dc3545;
-    color: white;
-  }
-
-  .proceed-btn {
-    background: #198754;
-    color: white;
-  }
-
-  .remember-choice {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 0.9em;
-    color: #555;
-  }
-
-  .loading-indicator {
-    text-align: center;
-    margin-top: 12px;
-    color: #666;
-  }
-
-  @keyframes privacyGuardSlideIn {
-    from {
-      transform: translateY(-12px);
-      opacity: 0;
-    }
-    to {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
-`;
-
-const styleSheet = document.createElement("style");
-styleSheet.textContent = styles;
-(document.head || document.documentElement).appendChild(styleSheet);
+  console.info("Privacy Guard: Content script initialized.");
+})();
