@@ -1,68 +1,116 @@
-# Privacy Guard - Indian Document Protection
+# Privacy Guard 🛡️
 
-A Chrome extension to protect sensitive Indian documents and information from accidental sharing.
+Privacy Guard is a Chrome extension designed to help users think twice before submitting forms containing potentially sensitive Indian personal information.
 
-## Features
+## 💡 Why Privacy Guard?
 
-- Detects and protects sensitive Indian documents:
-  - Aadhaar Number
-  - PAN Card
-  - Bank Account Details
-  - UPI IDs
-  - Phone Numbers
-  - Credit/Debit Cards
-  - GST Numbers
-  - Voter ID
-  - Indian Passport
-  - Driving License
+Online fraud and scams are increasing. Privacy Guard aims to make people more aware of the sensitive information they share online. Instead of automatically blocking users, it displays a warning so they can review the information and decide whether to continue.
 
-- Smart Detection:
-  - Context-aware validation
-  - Form context detection
+## ✨ Features
 
-## Installation
+- Detects patterns resembling Aadhaar numbers and PAN cards.
+- Detects Indian phone numbers and potentially sensitive banking information.
+- Identifies patterns resembling bank account numbers, IFSC codes, UPI IDs, and card numbers.
+- Warns users before submitting forms containing detected information.
+- Lets users cancel submission or proceed anyway.
+- Provides configurable detection settings.
+- Supports trusted sites to suppress repeated warnings.
+- Built using Chrome Extension Manifest V3.
 
-### For Development
-1. Clone this repository
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable "Developer mode" (toggle in top right)
-4. Click "Load unpacked"
-5. Select the extension directory
+## 📁 Project Structure
 
-### For Testing
-1. Open `test.html` in Chrome after installing the extension
-2. Try submitting the test forms with sample data:
-   - Aadhaar: 1234 5678 9012
-   - PAN: ABCDE1234F
-   - Phone: +91 9876543210
-   - UPI: name@okaxis
-   - Bank Account: 123456789
-   - IFSC: SBIN0123456
-
-## Development
-
-### Project Structure
-```
+```text
 privacy-guard/
-├── manifest.json      # Extension configuration
-├── content.js         # Main detection logic
-├── popup.html         # Settings popup
-├── popup.js          # Settings management
-├── styles.css        # UI styles
-├── guide_hi.html     # Hindi guide
-└── icons/            # Extension icons
+├── manifest.json
+├── content.js
+├── popup.html
+├── popup.js
+├── styles.css
+├── guide_hi.html
+└── icons/
+    └── icon48.png
 ```
 
-### Testing Checklist
-- [ ] Form Detection
-  - Submit forms with sensitive data
-  - Check alert popup.
-- [ ] Context Detection
-  - Test banking forms
-  - Test government forms
-  - Test personal information forms
-- [ ] Settings
-  - Enable/disable extension
-  - Add trusted websites
-  - Configure detection types
+## 🚀 Installation
 
+1. Download or clone the project.
+2. Open Google Chrome and navigate to `chrome://extensions/`.
+3. Enable **Developer mode**.
+4. Click **Load unpacked**.
+5. Select the Privacy Guard project folder.
+6. For local HTML testing, open the extension's Details page and enable **Allow access to file URLs**.
+7. Reload the extension and refresh your test page whenever you change the code.
+
+## 🧭 How to Use
+
+1. Click the Privacy Guard icon in the Chrome toolbar.
+2. Enable **Protection Active**.
+3. Choose the information categories you want to detect.
+4. Fill in a form using dummy test data.
+5. Review the warning if potentially sensitive information is detected.
+6. Select **Cancel Submission** to stop or **Proceed Anyway** to continue.
+7. Add a website to trusted sites only if you understand the implications of suppressing future warnings there.
+
+## 🧪 Testing
+
+Use dummy data only. Never use real Aadhaar, PAN, bank account, or payment details for testing.
+
+- Verify that a warning appears when detection is enabled.
+- Disable an individual detection category and test again.
+- Verify that Cancel prevents the form submission.
+- Verify that Proceed Anyway resumes the submission.
+- Test the protection toggle.
+- Test the trusted-sites functionality.
+- Check the browser console if errors occur.
+
+## 🔐 Permissions
+
+- **storage:** Stores extension settings and trusted-site preferences.
+- **activeTab:** Supports workflows requiring access to the active tab.
+- **file URL access:** Allows testing on local HTML files when enabled in Chrome's extension settings.
+
+## 🛡️ Privacy and Security
+
+Privacy Guard is an awareness tool, not a complete data-loss prevention system.
+
+- Pattern matching can produce false positives and false negatives.
+- It cannot guarantee detection of every sensitive value or submission method.
+- The current approach focuses on standard HTML form submissions and may not cover every website, iframe, script, or network request.
+- Users can choose to proceed after receiving a warning.
+- Trusted sites may bypass warnings, so use that setting carefully.
+- Test using dummy information and review the code before using the extension in sensitive environments.
+
+## 🛠️ Troubleshooting
+
+### Corrupted symbols in the popup
+
+Ensure `popup.html` includes:
+
+```html
+<meta charset="UTF-8">
+```
+
+Save the file using UTF-8 encoding. If an emoji remains corrupted, replace it with plain text or a local icon image.
+
+### Chrome storage errors
+
+1. Open `chrome://extensions/`.
+2. Reload Privacy Guard.
+3. Refresh the page being tested.
+4. Confirm that `manifest.json` includes the `storage` permission.
+5. For local files, enable **Allow access to file URLs**.
+
+### Changes are not visible
+
+Save your changes, reload the extension, refresh the test page, and reopen the popup.
+
+## 🧰 Technologies Used
+
+- HTML
+- CSS
+- JavaScript
+- Chrome Extensions Manifest V3
+
+## ⚠️ Disclaimer
+
+Privacy Guard is an educational and awareness-focused project. It is provided as-is and does not guarantee complete protection against accidental disclosure, scams, or online fraud.
