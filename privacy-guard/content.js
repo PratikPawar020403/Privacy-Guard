@@ -1,7 +1,7 @@
 
 "use strict";
 
-// Indian-specific sensitive data detection patterns
+// Privacy Guard — Indian sensitive-data detection
 const indianPatterns = {
   pan: /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g,
   aadhaar: /\b(?!0000\s?0000\s?0000\b)(?:[2-9]\d{3}[\s-]?){2}\d{4}\b/g,
@@ -11,9 +11,6 @@ const indianPatterns = {
   upi: /[\w.-]+@(?:oksbi|okaxis|okicici|okhdfc|ybl|ibl|upi|paytm|apl)\b/gi,
   card: /\b(?:\d{4}[\s-]?){3}\d{4}\b/g
 };
-
-// Prevent the extension from intercepting a submission twice.
-const bypassForms = new WeakSet();
 
 const typeLabels = {
   aadhaar: "Aadhaar Number",
@@ -25,8 +22,14 @@ const typeLabels = {
   card: "Card Number"
 };
 
+// Forms approved for submission once, without another warning.
+const bypassForms = new WeakSet();
+
+// Safely read extension settings.
 async function getStorageSettings() {
   try {
+    if (!chrome?.storage?.local) return null;
+
     return await chrome.storage.local.get([
       "enabled",
       "detectAadhaar",
@@ -36,11 +39,12 @@ async function getStorageSettings() {
       "trustedDomains"
     ]);
   } catch (error) {
-    console.warn("Privacy Guard: Could not read settings.", error);
+    console.warn("Privacy Guard: Could not access Chrome storage.", error);
     return null;
   }
 }
 
+// Add the current website to the trusted-sites list.
 async function saveTrustedDomain(domain) {
   try {
     const result = await chrome.storage.local.get("trustedDomains");
@@ -59,6 +63,7 @@ async function saveTrustedDomain(domain) {
   }
 }
 
+// Map popup settings to detection types.
 function getEnabledTypes(settings) {
   return {
     aadhaar: settings.detectAadhaar !== false,
@@ -71,36 +76,31 @@ function getEnabledTypes(settings) {
   };
 }
 
+// Find sensitive-looking values in text form fields.
 function detectSensitiveData(formData, enabledTypes) {
   const detected = [];
 
-  for (const [name, value] of formData.entries()) {
-    // Ignore uploaded files; scan text fields only.
-    if (typeof value !== "string" || !value.trim()) {
-      continue;
-    }
+  for (const [, value] of formData.entries()) {
+    if (typeof value !== "string" || !value.trim()) continue;
 
     for (const [type, pattern] of Object.entries(indianPatterns)) {
-      if (!enabledTypes[type]) {
-        continue;
-      }
+      if (!enabledTypes[type]) continue;
 
-      // Reset regex state before each scan.
       pattern.lastIndex = 0;
       const matches = value.match(pattern);
 
-      if (matches && matches.length > 0) {
-        let entry = detected.find(item => item.type === type);
+      if (!matches) continue;
 
-        if (!entry) {
-          entry = { type, values: [] };
-          detected.push(entry);
-        }
+      let item = detected.find(entry => entry.type === type);
 
-        for (const match of matches) {
-          if (!entry.values.includes(match)) {
-            entry.values.push(match);
-          }
+      if (!item) {
+        item = { type, values: [] };
+        detected.push(item);
+      }
+
+      for (const match of matches) {
+        if (!item.values.includes(match)) {
+          item.values.push(match);
         }
       }
     }
@@ -109,34 +109,36 @@ function detectSensitiveData(formData, enabledTypes) {
   return detected;
 }
 
+// Mask sensitive values before displaying them in the warning.
 function maskSensitiveValue(type, value) {
   switch (type) {
     case "aadhaar": {
       const digits = value.replace(/\D/g, "");
-      return "XXXX XXXX " + digits.slice(-4);
+      return `XXXX XXXX ${digits.slice(-4)}`;
     }
 
     case "pan":
-      return value.slice(0, 2) + "XXX XXXX" + value.slice(-1);
+      return `${value.slice(0, 2)}XXX XXXX${value.slice(-1)}`;
 
     case "card": {
       const digits = value.replace(/\D/g, "");
-      return "XXXX XXXX XXXX " + digits.slice(-4);
+      return `XXXX XXXX XXXX ${digits.slice(-4)}`;
     }
 
     case "phone": {
       const digits = value.replace(/\D/g, "");
-      return "XXXXXX" + digits.slice(-4);
+      return `XXXXXX${digits.slice(-4)}`;
     }
 
     case "account":
-      return "XXXX" + value.slice(-4);
+      return `XXXX${value.slice(-4)}`;
 
     default:
       return value;
   }
 }
 
+// Build the warning using textContent to avoid injecting page data as HTML.
 function createModal(detected) {
   const overlay = document.createElement("div");
   overlay.className = "privacy-guard-overlay";
@@ -146,9 +148,6 @@ function createModal(detected) {
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
   modal.setAttribute("aria-labelledby", "privacy-guard-title");
-
-  const content = document.createElement("div");
-  content.className = "modal-content";
 
   const title = document.createElement("h3");
   title.id = "privacy-guard-title";
@@ -161,25 +160,23 @@ function createModal(detected) {
   const list = document.createElement("ul");
 
   for (const item of detected) {
-    const listItem = document.createElement("li");
+    const li = document.createElement("li");
     const strong = document.createElement("strong");
 
     strong.textContent = typeLabels[item.type] || item.type;
-    listItem.appendChild(strong);
-    listItem.appendChild(document.createTextNode(": "));
+    li.append(strong, document.createTextNode(": "));
 
-    const maskedValues = item.values
+    const masked = item.values
       .slice(0, 2)
       .map(value => maskSensitiveValue(item.type, value));
 
-    listItem.appendChild(
+    li.appendChild(
       document.createTextNode(
-        maskedValues.join(", ") +
-        (item.values.length > 2 ? " ..." : "")
+        masked.join(", ") + (item.values.length > 2 ? " ..." : "")
       )
     );
 
-    list.appendChild(listItem);
+    list.appendChild(li);
   }
 
   const warning = document.createElement("p");
@@ -222,15 +219,13 @@ function createModal(detected) {
 
   buttonGroup.append(cancelButton, proceedButton);
   buttons.append(rememberLabel, buttonGroup);
-  content.append(title, intro, list, warning, buttons, loading);
-  modal.appendChild(content);
+  modal.append(title, intro, list, warning, buttons, loading);
   overlay.appendChild(modal);
 
   (document.body || document.documentElement).appendChild(overlay);
 
   return {
     overlay,
-    modal,
     cancelButton,
     proceedButton,
     rememberCheckbox,
@@ -238,8 +233,14 @@ function createModal(detected) {
   };
 }
 
-// Re-submit normally so browser validation and submit events can run.
+// Resume submission while allowing the browser's validation to run.
 function resubmitForm(form, submitter) {
+  // If the form is invalid, do not bypass the next user submission.
+  if (!form.checkValidity()) {
+    form.reportValidity();
+    return;
+  }
+
   bypassForms.add(form);
 
   try {
@@ -254,16 +255,17 @@ function resubmitForm(form, submitter) {
     }
   } catch (error) {
     bypassForms.delete(form);
-    console.warn("Privacy Guard: Could not resubmit form.", error);
+    console.warn("Privacy Guard: Could not resume form submission.", error);
   }
 }
 
+// Display the warning and wait for the user's choice.
 function showPrivacyWarning(form, submitter, detected, domain) {
   return new Promise(resolve => {
     const ui = createModal(detected);
     let finished = false;
 
-    function closeModal(shouldSubmit) {
+    function finish(shouldSubmit) {
       if (finished) return;
       finished = true;
       ui.overlay.remove();
@@ -276,7 +278,7 @@ function showPrivacyWarning(form, submitter, detected, domain) {
     }
 
     ui.cancelButton.addEventListener("click", () => {
-      closeModal(false);
+      finish(false);
     });
 
     ui.proceedButton.addEventListener("click", async () => {
@@ -288,45 +290,42 @@ function showPrivacyWarning(form, submitter, detected, domain) {
         await saveTrustedDomain(domain);
       }
 
-      closeModal(true);
+      finish(true);
     });
 
-    // Close the warning if the user clicks outside the dialog.
     ui.overlay.addEventListener("click", event => {
       if (event.target === ui.overlay) {
-        closeModal(false);
+        finish(false);
       }
     });
   });
 }
 
+// Main form-submission handler.
 async function handleFormSubmission(event) {
   const form = event.target;
 
-  if (!(form instanceof HTMLFormElement)) {
-    return;
-  }
+  if (!(form instanceof HTMLFormElement)) return;
 
-  // This is a resubmission already approved by the user.
+  // This submission has already been approved.
   if (bypassForms.has(form)) {
     bypassForms.delete(form);
     return;
   }
 
-  // Pause while settings and form contents are checked.
   event.preventDefault();
-
   const submitter = event.submitter;
 
   try {
     const settings = await getStorageSettings();
 
-    // If settings cannot be read, avoid blocking the user's form.
+    // If storage is unavailable, fail open so the site can still work.
     if (!settings) {
       resubmitForm(form, submitter);
       return;
     }
 
+    // Respect the main protection switch.
     if (settings.enabled === false) {
       resubmitForm(form, submitter);
       return;
@@ -335,14 +334,17 @@ async function handleFormSubmission(event) {
     const domain = window.location.hostname || "localhost";
     const trustedDomains = settings.trustedDomains || [];
 
+    // Trusted sites must be allowed to submit.
     if (trustedDomains.includes(domain)) {
       resubmitForm(form, submitter);
       return;
     }
 
     const enabledTypes = getEnabledTypes(settings);
-    const formData = new FormData(form);
-    const detected = detectSensitiveData(formData, enabledTypes);
+    const detected = detectSensitiveData(
+      new FormData(form),
+      enabledTypes
+    );
 
     if (detected.length === 0) {
       resubmitForm(form, submitter);
@@ -356,10 +358,10 @@ async function handleFormSubmission(event) {
   }
 }
 
-// Register the form listener.
+// Capture submit events before most page-level handlers.
 document.addEventListener("submit", handleFormSubmission, true);
 
-// Inject warning dialog styles.
+// Warning dialog styles.
 const styles = `
   .privacy-guard-overlay {
     position: fixed;
