@@ -1,210 +1,322 @@
-// Indian-specific detection patterns
+
+/* Indian-specific detection patterns */
 const indianPatterns = {
-  pan: /[A-Z]{5}[0-9]{4}[A-Z]\b/g,
-  aadhaar: /\b(?!0000\s?0000\s?0000\b)(?:[2-9](?:\d{3}[\s-]?){2}\d{4})\b/g,
+  pan: /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g,
+  aadhaar: /\b(?!0000\s?0000\s?0000\b)(?:[2-9]\d{3}[\s-]?){2}\d{4}\b/g,
   phone: /(?:(?:\+91|0)?[\s-]?)?[6789]\d{9}\b/g,
   account: /\b\d{9,18}\b/g,
   ifsc: /\b[A-Z]{4}0[A-Z0-9]{6}\b/g,
   upi: /[\w.-]+@(?:oksbi|okaxis|okicici|okhdfc|ybl|ibl|upi|paytm|apl)\b/gi,
-  card: /\b(?:\d{4}[\s-]?){4}\b/g
+  card: /\b(?:\d{4}[\s-]?){3}\d{4}\b/g
 };
 
-// Function to safely access chrome storage
+/* Chrome storage helpers */
 async function getTrustedDomains() {
   try {
-    const result = await chrome.storage.local.get('trustedDomains');
+    const result = await chrome.storage.local.get("trustedDomains");
     return result.trustedDomains || [];
   } catch (error) {
-    console.warn('Could not access chrome storage:', error);
-    return [];
+    console.warn("Could not access trusted domains:", error);
+    throw error;
   }
 }
 
 async function saveTrustedDomain(domain) {
   try {
-    const currentDomains = await getTrustedDomains();
-    if (!currentDomains.includes(domain)) {
+    const domains = await getTrustedDomains();
+
+    if (!domains.includes(domain)) {
       await chrome.storage.local.set({
-        trustedDomains: [...currentDomains, domain]
+        trustedDomains: [...domains, domain]
       });
     }
+
     return true;
   } catch (error) {
-    console.warn('Could not save to chrome storage:', error);
+    console.warn("Could not save trusted domain:", error);
     return false;
   }
 }
 
-function createModal(detected) {
-  const overlay = document.createElement('div');
-  overlay.className = 'privacy-guard-overlay';
-  
-  const modal = document.createElement('div');
-  modal.className = 'privacy-modal';
-  
-  const sanitizedDetected = detected.map(d => ({
-    type: d.type,
-    values: d.values.map(v => {
-      if (d.type === 'aadhaar') {
-        return v.replace(/(\d{4})\s*(\d{4})\s*(\d{4})/, 'XXXX XXXX $3');
-      } else if (d.type === 'pan') {
-        return v.replace(/([A-Z]{5})(\d{4})([A-Z])/, '$1 XXXX $3');
-      } else if (d.type === 'card') {
-        return v.replace(/(\d{4})\s*(\d{4})\s*(\d{4})\s*(\d{4})/, 'XXXX XXXX XXXX $4');
-      }
-      return v;
-    })
-  }));
-
-  modal.innerHTML = `
-    <div class="modal-content">
-      <h3>🛡️ Privacy Alert!</h3>
-      <p>We detected the following sensitive information:</p>
-      <ul>
-        ${sanitizedDetected.map(d => `
-          <li>
-            <strong>${getLocalizedType(d.type)}:</strong>
-            ${d.values.slice(0, 2).join(', ')}
-            ${d.values.length > 2 ? '...' : ''}
-          </li>
-        `).join('')}
-      </ul>
-      <p class="warning-text">Are you sure you want to share this information?</p>
-      <div class="modal-buttons">
-        <label class="remember-choice">
-          <input type="checkbox" id="remember-choice"> Remember this site
-        </label>
-        <div class="button-group">
-          <button class="cancel-btn">Cancel</button>
-          <button class="proceed-btn">Proceed</button>
-        </div>
-      </div>
-      <div class="loading-indicator">Processing...</div>
-    </div>
-  `;
-
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
-  return { overlay, modal };
-}
-
 function getLocalizedType(type) {
   const typeMap = {
-    'aadhaar': 'Aadhaar Number',
-    'pan': 'PAN Card',
-    'phone': 'Phone Number',
-    'card': 'Card Number',
-    'account': 'Account Number',
-    'ifsc': 'IFSC Code',
-    'upi': 'UPI ID'
+    aadhaar: "Aadhaar Number",
+    pan: "PAN Card",
+    phone: "Phone Number",
+    card: "Card Number",
+    account: "Account Number",
+    ifsc: "IFSC Code",
+    upi: "UPI ID"
   };
+
   return typeMap[type] || type.toUpperCase();
 }
 
-// Main form submission handler
-async function handleFormSubmission(e) {
-  const form = e.target;
-  const formData = new FormData(form);
-  const detected = [];
+/* Create the privacy warning */
+function createModal(detected) {
+  const overlay = document.createElement("div");
+  overlay.className = "privacy-guard-overlay";
 
-  // Check for sensitive data
-  for (let [name, value] of formData.entries()) {
-    if (typeof value === 'string') {
-      for (let [type, pattern] of Object.entries(indianPatterns)) {
-        const matches = value.match(pattern);
-        if (matches) {
-          detected.push({
-            type,
-            values: matches
-          });
-        }
+  const modal = document.createElement("div");
+  modal.className = "privacy-modal";
+
+  // Mask sensitive values before displaying them.
+  const sanitizedDetected = detected.map(item => ({
+    type: item.type,
+    values: item.values.map(value => {
+      if (item.type === "aadhaar") {
+        return value.replace(
+          /\d{4}[\s-]?\d{4}[\s-]?(\d{4})/,
+          "XXXX XXXX $1"
+        );
+      }
+
+      if (item.type === "pan") {
+        return value.replace(
+          /^([A-Z]{2})[A-Z]{3}\d{4}([A-Z])$/,
+          "$1XXX XXXX$2"
+        );
+      }
+
+      if (item.type === "card") {
+        const digits = value.replace(/\D/g, "");
+        return `XXXX XXXX XXXX ${digits.slice(-4)}`;
+      }
+
+      if (item.type === "phone") {
+        return `XXXXXX${value.slice(-4)}`;
+      }
+
+      if (item.type === "account") {
+        return `XXXX${value.slice(-4)}`;
+      }
+
+      return value;
+    })
+  }));
+
+  // Use DOM methods and textContent to safely display detected values.
+  const content = document.createElement("div");
+  content.className = "modal-content";
+
+  const heading = document.createElement("h3");
+  heading.textContent = "🛡️ Privacy Alert!";
+
+  const description = document.createElement("p");
+  description.textContent =
+    "We detected the following sensitive information:";
+
+  const list = document.createElement("ul");
+
+  sanitizedDetected.forEach(item => {
+    const li = document.createElement("li");
+    const strong = document.createElement("strong");
+
+    strong.textContent = `${getLocalizedType(item.type)}: `;
+    li.appendChild(strong);
+    li.appendChild(
+      document.createTextNode(
+        item.values.slice(0, 2).join(", ") +
+        (item.values.length > 2 ? "..." : "")
+      )
+    );
+
+    list.appendChild(li);
+  });
+
+  const warning = document.createElement("p");
+  warning.className = "warning-text";
+  warning.textContent =
+    "Are you sure you want to share this information?";
+
+  const buttons = document.createElement("div");
+  buttons.className = "modal-buttons";
+
+  const rememberLabel = document.createElement("label");
+  rememberLabel.className = "remember-choice";
+
+  const rememberChoice = document.createElement("input");
+  rememberChoice.type = "checkbox";
+  rememberChoice.id = "remember-choice";
+
+  rememberLabel.append(
+    rememberChoice,
+    document.createTextNode(" Remember this site")
+  );
+
+  const buttonGroup = document.createElement("div");
+  buttonGroup.className = "button-group";
+
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.className = "cancel-btn";
+  cancelButton.textContent = "Cancel";
+
+  const proceedButton = document.createElement("button");
+  proceedButton.type = "button";
+  proceedButton.className = "proceed-btn";
+  proceedButton.textContent = "Proceed";
+
+  buttonGroup.append(cancelButton, proceedButton);
+  buttons.append(rememberLabel, buttonGroup);
+
+  const loading = document.createElement("div");
+  loading.className = "loading-indicator";
+  loading.textContent = "Processing...";
+
+  content.append(heading, description, list, warning, buttons, loading);
+  modal.appendChild(content);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  return { overlay, modal };
+}
+
+/* Check which categories are enabled */
+function getEnabledTypes(settings) {
+  return {
+    aadhaar: settings.detectAadhaar !== false,
+    pan: settings.detectPAN !== false,
+    phone: settings.detectPhone !== false,
+    account: settings.detectBank !== false,
+    ifsc: settings.detectBank !== false,
+    upi: true,
+    card: true
+  };
+}
+
+/* Scan the form */
+function detectSensitiveData(form, enabledTypes) {
+  const detected = [];
+  const formData = new FormData(form);
+
+  for (const [, value] of formData.entries()) {
+    if (typeof value !== "string") continue;
+
+    for (const [type, pattern] of Object.entries(indianPatterns)) {
+      if (!enabledTypes[type]) continue;
+
+      // Regexes use the global flag, so reset their state.
+      pattern.lastIndex = 0;
+
+      const matches = value.match(pattern);
+
+      if (matches) {
+        detected.push({
+          type,
+          values: [...new Set(matches)]
+        });
       }
     }
   }
 
-  if (detected.length > 0) {
-    e.preventDefault();
-    
-    try {
-      // Check if domain is trusted
-      const domain = window.location.hostname || 'localhost';
-      const trustedDomains = await getTrustedDomains();
-      
-      if (trustedDomains.includes(domain)) {
-        return; // Allow submission for trusted domains
-      }
+  return detected;
+}
 
-      const { overlay, modal } = createModal(detected);
-      
-      return new Promise((resolve) => {
-        const cancelBtn = modal.querySelector('.cancel-btn');
-        const proceedBtn = modal.querySelector('.proceed-btn');
-        const rememberChoice = modal.querySelector('#remember-choice');
-        const loadingIndicator = modal.querySelector('.loading-indicator');
+/*
+ * Submit a form without firing another submit event.
+ * This follows native form.submit() behavior and bypasses
+ * built-in constraint validation.
+ */
+function submitForm(form) {
+  HTMLFormElement.prototype.submit.call(form);
+}
 
-        cancelBtn.addEventListener('click', () => {
-          overlay.remove();
-          resolve(false);
-        });
+/* Main submission handler */
+async function handleFormSubmission(event) {
+  const form = event.target;
 
-        proceedBtn.addEventListener('click', async () => {
-          loadingIndicator.style.display = 'block';
-          
-          try {
-            // Only save to trusted domains if checkbox is checked
-            if (rememberChoice.checked) {
-              await saveTrustedDomain(domain);
-            }
+  if (!(form instanceof HTMLFormElement)) return;
 
-            // Remove the overlay before submitting
-            overlay.remove();
-            
-            // Create a clone of the form
-            const clonedForm = form.cloneNode(true);
-            
-            // Copy over form data
-            for (let [name, value] of formData.entries()) {
-              const input = clonedForm.querySelector(`[name="${name}"]`);
-              if (input) {
-                input.value = value;
-              }
-            }
-            
-            // Submit the form directly
-            clonedForm.style.display = 'none';
-            document.body.appendChild(clonedForm);
-            clonedForm.submit();
-            
-            // Clean up
-            setTimeout(() => {
-              document.body.removeChild(clonedForm);
-            }, 100);
-            
-            resolve(true);
-          } catch (error) {
-            console.warn('Error during form submission:', error);
-            // Still allow form submission even if storage fails
-            form.submit();
-            resolve(true);
-          }
-        });
-      });
-    } catch (error) {
-      console.warn('Error in form handler:', error);
-      return true; // Allow form submission if something goes wrong
+  // Pause while settings and detection are checked.
+  event.preventDefault();
+
+  try {
+    const settings = await chrome.storage.local.get([
+      "enabled",
+      "detectAadhaar",
+      "detectPAN",
+      "detectBank",
+      "detectPhone"
+    ]);
+
+    // Protection disabled: submit without scanning.
+    if (settings.enabled === false) {
+      submitForm(form);
+      return;
     }
+
+    const domain = window.location.hostname || "localhost";
+    const trustedDomains = await getTrustedDomains();
+
+    // Trusted domains bypass warnings.
+    if (trustedDomains.includes(domain)) {
+      submitForm(form);
+      return;
+    }
+
+    const enabledTypes = getEnabledTypes(settings);
+    const detected = detectSensitiveData(form, enabledTypes);
+
+    // No enabled sensitive pattern found.
+    if (detected.length === 0) {
+      submitForm(form);
+      return;
+    }
+
+    const { overlay, modal } = createModal(detected);
+
+    const cancelButton = modal.querySelector(".cancel-btn");
+    const proceedButton = modal.querySelector(".proceed-btn");
+    const rememberChoice = modal.querySelector("#remember-choice");
+    const loading = modal.querySelector(".loading-indicator");
+
+    // Cancel means the form stays unsubmitted.
+    cancelButton.addEventListener("click", () => {
+      overlay.remove();
+    });
+
+    // Prevent repeated clicks while proceeding.
+    proceedButton.addEventListener("click", async () => {
+      proceedButton.disabled = true;
+      cancelButton.disabled = true;
+      loading.style.display = "block";
+
+      try {
+        if (rememberChoice.checked) {
+          const saved = await saveTrustedDomain(domain);
+
+          if (!saved) {
+            console.warn("The site could not be saved as trusted.");
+          }
+        }
+
+        overlay.remove();
+        submitForm(form);
+      } catch (error) {
+        console.error("Submission error:", error);
+        proceedButton.disabled = false;
+        cancelButton.disabled = false;
+        loading.style.display = "none";
+      }
+    });
+  } catch (error) {
+    console.error("Privacy Guard encountered an error:", error);
+
+    // Fail open so a storage error does not permanently block
+    // the user's form submission.
+    submitForm(form);
   }
 }
 
-// Add form submission listener
-document.addEventListener('submit', handleFormSubmission);
+/* Register the listener once */
+document.addEventListener("submit", handleFormSubmission);
 
-// Inject styles
+/* Inject warning styles */
 const styles = `
   .privacy-guard-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
+    inset: 0;
     width: 100%;
     height: 100%;
     background: rgba(0, 0, 0, 0.5);
@@ -225,19 +337,13 @@ const styles = `
   }
 
   @keyframes slideIn {
-    from {
-      transform: translateY(-20px);
-      opacity: 0;
-    }
-    to {
-      transform: translateY(0);
-      opacity: 1;
-    }
+    from { transform: translateY(-20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
   }
 
   .privacy-modal h3 {
     color: #dc3545;
-    margin: 0 0 15px 0;
+    margin: 0 0 15px;
     font-size: 1.4em;
   }
 
@@ -251,6 +357,7 @@ const styles = `
     padding: 8px;
     background: #f8f9fa;
     border-radius: 4px;
+    overflow-wrap: anywhere;
   }
 
   .warning-text {
@@ -266,6 +373,7 @@ const styles = `
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
     margin-top: 20px;
   }
 
@@ -295,7 +403,12 @@ const styles = `
 
   .cancel-btn:hover, .proceed-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  }
+
+  .cancel-btn:disabled, .proceed-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
   }
 
   .remember-choice {
@@ -314,6 +427,6 @@ const styles = `
   }
 `;
 
-const styleSheet = document.createElement('style');
+const styleSheet = document.createElement("style");
 styleSheet.textContent = styles;
-document.head.appendChild(styleSheet);
+(document.head || document.documentElement).appendChild(styleSheet);
